@@ -1,1 +1,121 @@
 \section{Background}
+\label{sec:background}
+%
+First, we will review the major components of our data-parallel deductive database, using path-finding in graphs as an illustrative example. In query languages for deductive databases, rules can be provided to define additional relations (tables) defined in terms of others.
+
+\begin{verbatim}
+        B(x,y) :- G(x,y), G(y,x), x<y.
+\end{verbatim}
+
+The above rule infers a relation $B$ which gets a single tuple $(x,y)$ for each bi-direction edge in an input table $G$, that encodes a graph. Because $G$ appears twice in the body of the rule, we must effectively join the table with itself; then, a final constraint, $x<y$, filters this output so that edges are added to $B$ only once, in canonical order.
+
+\subsection{Deductive Databases}
+
+The databases rules can also be recursive, as in a Datalog program for computing the transitive closure, $T$, of a graph $G$: 
+
+\begin{verbatim}
+        T(x,y) :- G(x,y).
+        T(x,z) :- T(x,y), G(y,z).
+\end{verbatim}
+
+The first rule represents a base case that says every x-to-y edge in $G$ implies an immediate x-to-y path in $T$. The second rule is recursive and must be iterated repeatedly until stabilizing at a consistent value for $T$. The first rule can be implemented using a single relational union of $G$ and $T$ (unless we can assume $T$ is empty), or using insertion of every element in $G$ into $T$. The second rule can be implemented by iteration of a kernel function, composed of several relational operations, iterated to a least-fixed-point where $T$ is minimally consistent with the second rule. One iteration of this function would join $T$ on its second column with $G$ on its first column, yielding all triples $(x,y,z)$ where $(x,y)$ can be drawn from $T$ and $(y,z)$ can be drawn from $G$. Projection to the set of unique $(x,z)$ tuples, removing the middle column (as a graph, this is removing the intermediate vertex in the discovered path), and unioning this set of tuples with those in $T$ completes one iteration of the second rule.  
+
+Consider a relation $G$, shown below as a table. Joining $G$ on its second column with $G$ on its first column yields a new relation, with three columns, encoding all paths of length $2$ through the graph $G$, where each path is made of three nodes in order.
+
+\begin{multicols}{2}
+\footnotesize
+  \center
+  \begin{tabular}{| c | c |}
+    \multicolumn{2}{c}{$G$}\\
+    \hline
+    ~~~\text{0}~~~ & ~~~\text{1}~~~ \\
+    \hline
+    \textbf{A} & \textbf{B} \\
+    \textbf{A} & \textbf{C} \\
+    \textbf{B} & \textbf{D} \\
+    \textbf{C} & \textbf{D} \\
+    \textbf{D} & \textbf{E} \\
+    \hline
+  \end{tabular}
+  \columnbreak
+
+  \raggedright
+  \begin{tabular}{| c | c | c |}
+    \multicolumn{3}{c}{$G$~joined~with~$G$}\\
+    \hline
+    ~~~\text{0}~~~ & ~~~\text{1}~~~ & ~~~\text{2}~~~ \\
+    \hline
+    \textbf{A} & \textbf{B} & \textbf{D} \\
+    \textbf{A} & \textbf{C} & \textbf{D} \\
+    \textbf{B} & \textbf{D} & \textbf{E} \\
+    \textbf{C} & \textbf{D} & \textbf{E} \\
+    \hline
+    \multicolumn{3}{c}{$\rho_{0/1}(\rho_{0/1}(G) \bowtie_1 G)$}\\
+  \end{tabular}
+\end{multicols}
+
+Note that to compute a single join of $G$ on its second column with $G$ on its first column, we first reverse $G$'s columns, computing $\rho_{0/1}(G)$ to reorder columns, so we may then compute a join on one column: $\rho_{0/1}(G) \bowtie_1 G$. To present the resulting paths of length two in order again, we may use renaming to swap the join column back to the middle position, as shown above. Our implementation provides more general operations that make this administrative renaming unnecessary. In the case of iterating the two rules above to compute a transitive closure of $G$, we use a persistent index for $G$, keyed on its first column, and a persistent index on $T$, keyed on its second column.
+
+We can encapsulate each iteration of TC computation as a function $\textit{Extend}_G$ which takes a graph $T$, and returns $T$'s edges extended with $G$'s edges, unioned with $G$.
+
+\[
+  \textit{Extend}_G(T) \triangleq G \cup \Pi_{1,2}(\rho_{0 / 1}(T) \bowtie_1 G)
+\]
+
+Consider a new graph $G$, at the top of Figure~\ref{fig:tc_parallel_diagram}. The graph $T$, below, is returned by $\textit{Extend}_G(\bot)$, the graph below it is returned by ${\textit{Extend}_G}^2(\bot)$, the graph below that is returned by ${\textit{Extend}_G}^3(\bot)$, etc. As $\textit{Extend}_G$ is repeatedly applied from an empty input, each result encodes ever longer paths through $G$, as shown. In this case for example, the graph ${\textit{Extend}_G}^4(\bot)$ encodes the transitive closure of $G$---all paths in $G$ reified as edges.
+One final iteration, computing ${\textit{Extend}_G}^5(\bot)$, is required to check that the process successfully reached a fixed point for $\textit{Extend}_G$.
+
+\begin{figure}[h]
+\begin{center}
+  \includegraphics[scale=0.38]{tc_parallel_diagram}
+\end{center}
+\caption{Transitive closure of a string graph distributed over two processes.}
+\label{fig:tc_parallel_diagram}
+\end{figure}
+
+Computing transitive closure is a simple example of logical inference.
+From paths of length zero (an empty graph) and the existence of edges in graph $G$, we deduce the existence of paths of length $0 \ldots 1$. From paths of length $0 \ldots n$ and the original edges in graph $G$, we deduce the existence of paths of length $0 \ldots n+1$.
+%
+This kind of logical inference forms the semantics of \emph{Datalog}, a bottom-up logic-programming language supporting a restricted logic corresponding roughly to first-order HornSAT---the SAT problem for conjunctions of Horn clauses~\cite{abiteboul1995foundations}.
+
+A Datalog program is a set of such rules,
+%
+\[ P(x_0,\ldots,x_k) \leftarrow Q(y_0,\ldots,y_j) \wedge \ldots \wedge S(z_0,\ldots,z_m), \]
+%
+and its input is a database of initial facts called the \emph{extensional database} (EDB). Running the datalog program makes explicit the \emph{intensional database} (IDB) which extends facts in the EDB with all facts transitively derivable via the program's rules.
+%
+Each Datalog rule may be encoded as a monotonic function $F$ (between databases) where a fixed point for the function is guaranteed to be a database that satisfies the particular rule. Once a set of functions $F_0 \ldots F_m$, one for each rule, are constructed, Datalog evaluation operates by iterating the IDB to a mutual fixed point for $F_0 \ldots F_m$.
+%
+Datalog inference must be monotonic, so that evaluation is strictly increasing, however a Datalog program may also be decomposed into a stratified directed acyclic graph (DAG) of strongly connected components (SCCs) encoding sets of mutually recursive rules. In practical Datalog implementations, such as Souffl\'e~\cite{Scholz:2016:FLP:2892208.2892226, 10.1007/978-3-319-41540-6}, the stratification of Datalog rules into SCCs also permits the weakening of monotonicity constraints and inclusion of negation and aggregation operations across SCCs. Crucially, once a Datalog program is compiled to SCCs, each SCC may be treated as an independent Datalog program with its own EDB and IDB---a property we can exploit when using IO for checkpointing.
+
+\subsection{Implementing Parallel Deductive Databases}
+%
+Beyond the basic process described, typical Datalog implementations use highly efficient and compressed data-structures \cite{brie-pmam, btree-ppopp}, automated selection of efficient indices \cite{Subotic:2018:AIS:3282495.3302538}, and incrementalism or semi-naive evaluation \cite{abiteboul1995foundations}. Our implementation distributes relations across a set of MPI processes, using nested B-trees locally to store indices.
+
+The double-hashing approach, with local hash-based joins and hash-based distribution of relations, is the most commonly used method to distribute join operations over many nodes in a networked cluster computer. This algorithm involves partitioning relations by their join-column values so that they can be efficiently distributed to participating processes~\cite{%Valduriez:1988:PET:54616.54618,
+  Cheiney:1990:PST:94362.94445, Cacace:1991:OPS:111828.111831}. The main insight behind this approach is that for each tuple in the outer relation, all relevant tuples in the inner relation must be hashed to the same MPI process or node, permitting joins to be performed locally on each process.
+
+Our recent approach proposes adapting the representation of imbalanced relations by using a two-layered distributed hash-table to partition tuples over a fixed set of \emph{buckets}. Within each bucket, tuples are assigned to one element of a dynamic set of \emph{subbuckets} which may vary across buckets~\cite{kumar:hipc:2019} and across time. Each tuple is assigned to a bucket based on a hash of its join-column values, but within each bucket, tuples are hashed on non-join-column values, assigning them to a local subbucket, then mapped to an MPI process. This permits buckets that have more tuples to be split across multiple processes, but requires some additional communication among subbuckets for any particular bucket. 
+
+Our implementation heavily relies on all-to-all communication as tuples produced by a local join may belong to another rank and must be moved before a subsequent iteration. 
+%We use the \texttt{MPI\_Alltoallv} function to transmit data from every process to every other process between iterations. Our use is related to distributed hash tables more generally~\cite{pan2018optimizing}, which make effective use of all-to-all communication, except that we co-locate multiple distributed hash tables for the purposes of performing efficient joins.
+Consider Figure~\ref{fig:tc_parallel_diagram}, which shows initial graphs $G$ and $T$ and each step of TC computation in a database distributed over two processes. $T$ is initially the same as graph $G$, but is indexed on its second column, so arrows are shown reversed. Each key value (vertex) is hashed to assign it to a bucket, and thus a process (shown as arrows colored blue or orange). Note how in the first iteration, an edge $T(0,1)$ keyed on value $1$ and assigned to process $0$ is composed with edge $G(1,0)$, keyed on value $1$ and also on process $0$, producing a new edge $T(0,2)$ that is keyed on value $2$ and assigned to process $1$. This requires our all-to-all communication phase between iterations which shuffles newly learned facts to their host process. 
+
+The Datalog program for TC shown above, compiles down to a program of two indices and two SCCs, one SCC for fixed initialization, and another SCC that performs an unbounded number of iterations to reach a fixed point for $T$. 
+%This final SCC as compiled to a DSL in C++ is shown in-full below. There are just two operations being performed in a loop, a join between $T_\Delta$ (tuples learned in the previous iteration) and $G$, and an administrative copy that moves tuples to their appropriate index during the all-to-all phase.
+
+
+%\begin{verbatim}[fontsize=\small]
+%RAM* scc3 = new RAM(true,1);
+%scc3->add_relation(G_2_2,false);
+%scc3->add_relation(T_2_1,true);
+%scc3->add_relation(T_2_1_2,true);
+%scc3->add_rule(
+%  new join(T_2_1_2,G_2_2,FULL,
+%                   T_2_1,DELTA,{2,4}));
+%scc3->add_rule(
+%  new acopy(T_2_1,G_2_1_2,DELTA,{0,2,1}));
+%\end{verbatim}
+
+
+The end-to-end pipeline showing each major phase of a parallel join can be seen in Figure~\ref{fig:end-to-end}. Intra-bucket communication first replicates tuples whose keys have matching hash values on a single node, only for the left-hand relation so that joins can be done efficiently in parallel. After the local join phase, an all-to-all phase propagates output tuples to their destination relations where they are inserted locally. At this point the iteration is over and can progress, with an optional I/O phase to save this point in evaluation.

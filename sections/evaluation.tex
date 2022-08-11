@@ -1,1 +1,27 @@
 \section{Evaluation}
+We evaluate cuDF and Pandas performance with three processes. We use execution time as metrics for all processes. First, we compare the execution time of single operations such as read, merge, drop, concatenation for cuDF and Pandas. Then we use triangle counting computation on several graph datasets. Finally, we use transitive closure (TC) computation on the same datasets to compare their performance. 
+
+\subsection{Experimental setup}
+
+\subsubsection{System and configuration}
+We use ThetaGPU from Argonne Leadership Computing Facility \cite{theta_2022}. We run our experiments with 8 NVIDIA A100 GPUs. The total memory of the GPU is 320GB. We use AMD EPYC 7742 64-Core Processor running 3.31GHz with 256 CPUs and 512MB L3 cache for CPU experiments. The CPU has a total of 1TB memory. The experiments are run using Ubuntu 20.04.4 LTS operating system on Linux 5.4.0-121-generic kernel. We use cuDF and Pandas Python packages inside conda environment with CUDA as GPU programming model. 
+
+\subsubsection{Datasets}
+Our evaluation include both real-world and synthetic from the Stanford large network dataset collection and road network real datasets collection for road networks\cite{snapnets, li2005trip}. Our datasets include both directed and undirected graphs. Table \ref{tab:dataset} shows the properties of the datasets. 
+
+    \begin{table}[h]
+    \caption{Datasets used in our experiments}
+    \label{tab:dataset}
+        \centering
+        \begin{tabular}{| p{0.15\linewidth} | p{0.25\linewidth} | p{0.13\linewidth} | p{0.12\linewidth} | p{0.12\linewidth} |}
+            \hline
+            Tag & Graph Name & Type & $|V|$ & $|E|$ \\ \hline \hline
+            p2p-Gnutella09 & Gnutella peer-to-peer network, August 9 2002 & Directed & 8,114 & 26,013 \\ \hline
+            p2p-Gnutella04 &Gnutella peer-to-peer network, August 4 2002 & Directed & 10,876 & 39,994 \\ \hline
+            roadNet-CA & California road network & Undirected & 1,965,206 & 2,766,607 \\ \hline
+            cal.cedge & California Road Network's Edges & Undirected & 21,048 & 21,693 \\ \hline
+            SF.cedge & San Francisco Road Network's Edges & Undirected & 1,74,955 & 2,23,001 \\ \hline
+            TG.cedge & San Joaquin County Road Network's Edges & Undirected & 18,263 & 23,874 \\ \hline
+            OL.cedge & Oldenburg Road Network's Edges & Undirected & 6,105 & 7,035 \\ \hline
+        \end{tabular}
+    \end{table}
